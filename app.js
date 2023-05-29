@@ -3,6 +3,18 @@
 const express = require('express')
 const app = express()
 const port = 3233
+var cors = require('cors')
+
+app.use(cors())
+
+//socket io
+
+const server = require('http').createServer(app);
+const io = require('socket.io')(server, {
+    cors: {
+      origin: 'http://127.0.0.1:5173',
+    }
+  });
 
 //conect postgre
 const pgp = require('pg-promise')(/* options */)
@@ -40,6 +52,25 @@ channel.bind('my-event', function(data) {
 });
 
 
+//socket io setting
+io.on('connection', (socket) => {
+    console.log('A user connected');
+  
+    // Handle chat messages
+    socket.on('chat message', (msg) => {
+      console.log(`Message: ${msg}`);
+  
+      // Broadcast the message to all other connected clients
+      io.emit('chat message', msg);
+    });
+  
+    // Handle disconnections
+    socket.on('disconnect', () => {
+      console.log('A user disconnected');
+    });
+  });
+
+
 //untuk export excell
 const json2xls = require('json2xls');
 
@@ -75,6 +106,7 @@ function createXlsxFile() {
 
 app.get('/', async  (req, res) => {
     res.send('laplap api');
+    io.emit('chat message', 'hello from server');
 })
 
 app.get('/get_excels', async  (req, res) => {
@@ -88,6 +120,6 @@ app.post('/test-page', (req, res) => {
     res.send(name);
 });
 
-app.listen(port, () => {
+server.listen(port, () => {
     console.log(`Example app listening on port ${port}`)
 })
