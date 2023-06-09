@@ -3,22 +3,19 @@
 const express = require('express')
 const app = express()
 const port = 3233
-var cors = require('cors')
 
-app.use(cors())
+//worker js to run code on background
+const { Worker }  = require('worker_threads');
+const worker = new Worker('./worker.js');
 
-//socket io
-
-const server = require('http').createServer(app);
-const io = require('socket.io')(server, {
-    cors: {
-      origin: 'http://127.0.0.1:5173',
-    }
+worker.on('message', (message) => {
+    console.log(`Received message from worker: ${JSON.stringify(message)}`);
   });
 
-//conect postgre
-const pgp = require('pg-promise')(/* options */)
-const db = pgp('postgres://itki:soetomo_dr@10.1.1.68:5487/simpp-dev')
+//cors origin
+var cors = require('cors')
+app.use(cors())
+
 
 //body parser untuk get body POST
 var bodyParser = require('body-parser')
@@ -26,6 +23,27 @@ app.use( bodyParser.json() );       // to support JSON-encoded bodies
 app.use(bodyParser.urlencoded({     // to support URL-encoded bodies
   extended: true
 })); 
+
+//chokidar for watch folder and file changes
+const chokidar = require('chokidar');
+
+
+//socket io
+
+const server = require('http').createServer(app);
+const io = require('socket.io')(server, {
+    cors: {
+         origin: 'http://172.9.1.157:5173',
+        //  methods: ["GET", "POST", "OPTIONS"],
+         optionsSuccessStatus: 200,
+         credentials: true
+    }
+  });
+
+//conect postgre
+const pgp = require('pg-promise')(/* options */)
+const db = pgp('postgres://itki:soetomo_dr@10.1.1.68:5487/simpp-dev')
+
 
 //pusher
 const Pusher = require("pusher");
@@ -53,7 +71,7 @@ channel.bind('my-event', function(data) {
 
 
 //socket io setting
-io.on('connection', (socket) => {
+ io.on('connection', (socket) => {
     console.log('A user connected');
   
     // Handle chat messages
@@ -61,9 +79,10 @@ io.on('connection', (socket) => {
       console.log(`Message: ${msg}`);
   
       // Broadcast the message to all other connected clients
-      io.emit('chat message', msg);
+    //   io.emit('chat message', msg);
+      socket.broadcast.emit("chat message", msg);
     });
-  
+    
     // Handle disconnections
     socket.on('disconnect', () => {
       console.log('A user disconnected');
@@ -79,20 +98,18 @@ const fs = require('fs');
 // const sql = fs.readFileSync('./soapie.sql').toString();
 
 // connection.end()
+
+
+//function create XLS
 function createXlsxFile() {
-    return new Promise((resolve, reject) => {
-        db.manyOrNone('select * from soapie_sql_v where tgl_pendaftaran >= $1 and tgl_pendaftaran < $2 limit 10000', ['2023-03-01 00:00:00', '2023-04-01 00:00:00'])
+    // return new Promise((resolve, reject) => {
+        db.manyOrNone('select * from soapie_sql_v where tgl_pendaftaran >= $1 and tgl_pendaftaran < $2', ['2023-03-01 00:00:00', '2023-04-01 00:00:00'])
         .then((data) => {
             try {
                 const jsonArray = data;
                 const xls = json2xls(jsonArray);
-               
                 fs.writeFileSync('data.xlsx', xls, 'binary');
-                // res.end(xls, 'binary');
-                pusher.trigger("my-channel", "my-event", {
-                    message: "berhasil download data excel"
-                });
-                resolve();
+                // resolve(xls);
             } catch (error) {
                 // Error handling code
             console.log('ERROR:', error)
@@ -101,9 +118,19 @@ function createXlsxFile() {
         .catch((error) => {
             console.log('ERROR:', error)
         })
+    // });
+}
+
+function cekExcel(name){
+    chokidar.watch(name).on('all', (event, path) => {
+        if (event == 'add'){
+            console.log(event, path);
+            io.emit("chat message", 'berhasil download');
+        }
     });
 }
 
+//routingg
 app.get('/', async  (req, res) => {
     res.send('laplap api');
     io.emit('chat message', 'hello from server');
@@ -111,7 +138,9 @@ app.get('/', async  (req, res) => {
 
 app.get('/get_excels', async  (req, res) => {
     res.send('xls sedang download');
-    createXlsxFile();
+    worker.postMessage({ data: 'proses convert ke excel!' });
+    // createXlsxFile();
+    cekExcel('data.xlsx');
 })
 
 app.post('/test-page', (req, res) => {
